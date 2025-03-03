@@ -3,10 +3,14 @@ import os
 import time
 import json
 import csv
+import logging
 from ..base_tool import BaseTool
 
 class HemaCrawler(BaseTool):
     """盒马商品数据采集工具"""
+    
+    # 定义为类属性
+    required_app = "盒马"
     
     def __init__(self, agent):
         """初始化盒马爬取工具"""
@@ -253,3 +257,67 @@ class HemaCrawler(BaseTool):
         self.products = []
         print(f"工具清理完成: {self.name}")
         return True
+
+    @staticmethod
+    def check_app_launched(agent):
+        """检查盒马是否成功启动
+        
+        通过以下方式验证当前页面是否属于盒马APP：
+        1. OCR识别特征文本
+        2. 大模型分析页面内容
+        """
+        # 获取屏幕截图和文本内容
+        screenshot = agent.device.capture_screenshot()
+        text_elements = agent.vision.extract_text(screenshot)
+        
+        # 1. 特征文本检查
+        text_content = ' '.join([elem["text"] for elem in text_elements])
+        feature_keywords = [
+            "盒马", "分类", "果蔬", "海鲜水产",
+            "购物车", "我的", "首页"
+        ]
+        keyword_matches = [kw for kw in feature_keywords if kw in text_content]
+        
+        # 2. 使用大模型分析页面内容
+        prompt = f"""
+        分析以下页面文本内容，判断是否是盒马APP的界面：
+        
+        页面文本：{text_content}
+        
+        特征匹配：以下是盒马APP特征关键词：{', '.join(keyword_matches)}
+        
+        请分析这是否是盒马APP的界面？只需回答：是或否？
+        """
+        
+        try:
+            messages = [
+                {"role": "user", "content": prompt}
+            ]
+            analysis = agent.brain._make_request(messages)
+            # 添加调试日志
+            # 解析响应
+            is_hema = "是" in analysis
+        except Exception as e:
+            logging.warning(f"大模型分析失败: {e}")
+            logging.debug(f"错误详情:", exc_info=True)
+            is_hema = False
+        
+        # 综合判断：关键词匹配数量 + 大模型判断
+        launch_success = len(keyword_matches) >= 3 and is_hema
+        print("关键词匹配数量：", len(keyword_matches))
+
+        # 记录详细日志
+        logging.info(f"盒马APP启动检查结果：")
+        logging.info(f"- 关键词匹配：找到 {len(keyword_matches)} 个 ({', '.join(keyword_matches)})")
+        logging.info(f"- 大模型分析：{'是' if is_hema else '否'}")
+        logging.info(f"- 最终判断：{'成功' if launch_success else '失败'}")
+        
+        return launch_success
+
+def _is_float(value):
+    """检查字符串是否可以转换为浮点数"""
+    try:
+        float(value)
+        return True
+    except ValueError:
+        return False

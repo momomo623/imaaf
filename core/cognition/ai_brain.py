@@ -19,7 +19,7 @@ class AIBrain:
         # 用于重试逻辑
         self.max_retries = 3
         self.base_wait_time = 2  # seconds
-    
+
     def _init_llm_client(self):
         """初始化大语言模型客户端"""
         self.client = OpenAI(
@@ -30,12 +30,11 @@ class AIBrain:
                 follow_redirects=True
             )
         )
-    
+
     def _make_request(self, messages, temperature=0.7, max_tokens=None):
         """向OpenAI API发送请求"""
         for attempt in range(self.max_retries):
             try:
-                # 使用SDK发送请求
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
@@ -43,13 +42,7 @@ class AIBrain:
                     max_tokens=max_tokens if max_tokens else None
                 )
                 
-                return {
-                    "choices": [{
-                        "message": {
-                            "content": response.choices[0].message.content
-                        }
-                    }]
-                }
+                return response.choices[0].message.content
                 
             except Exception as e:
                 print(f"请求失败 (尝试 {attempt + 1}/{self.max_retries}): {str(e)}")
@@ -134,10 +127,10 @@ class AIBrain:
         messages = [system_message, user_message]
         
         # 发送请求并解析响应
-        response = self._make_request(messages, temperature=0.2)
+        response_content = self._make_request(messages, temperature=0.2)
         
         # 提取决策内容
-        response_content = response["choices"][0]["message"]["content"]
+        # response_content = response["choices"][0]["message"]["content"]
         
         # 尝试从响应中提取JSON
         try:
@@ -204,10 +197,10 @@ class AIBrain:
         messages = [system_message, user_message]
         
         # 发送请求并解析响应
-        response = self._make_request(messages, temperature=0.2)
+        response_content = self._make_request(messages, temperature=0.2)
         
         # 提取分析结果
-        response_content = response["choices"][0]["message"]["content"]
+        # response_content = response["choices"][0]["message"]["content"]
         
         # 尝试从响应中提取JSON
         try:
@@ -273,7 +266,7 @@ class AIBrain:
         messages = [system_message, user_message]
         
         # 发送请求并解析响应
-        response = self._make_request(messages, temperature=0.1)
-        completion_check = response["choices"][0]["message"]["content"].strip()
+        completion_check = self._make_request(messages, temperature=0.1)
+        # completion_check = response["choices"][0]["message"]["content"].strip()
         
         return "已完成" in completion_check

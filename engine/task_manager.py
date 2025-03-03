@@ -2,6 +2,7 @@ import time
 import json
 import os
 from typing import Dict, Any, List, Optional
+from utools.tool_registry import ToolRegistry
 
 class TaskManager:
     """任务管理器，负责管理和执行任务"""
@@ -16,6 +17,7 @@ class TaskManager:
         self.current_task = None
         self.task_history = []
         self.max_task_history = 10
+        self.registry = ToolRegistry()
         
     def execute_task(self, task_config: Dict[str, Any]) -> Dict[str, Any]:
         """执行任务
@@ -27,23 +29,37 @@ class TaskManager:
             Dict: 任务执行结果
         """
         tool_name = task_config.get("tool")
-        params = task_config.get("params", {})
-        max_steps = task_config.get("max_steps", 15)
-        wait_time = task_config.get("wait_time", 1.5)
-        
         if not tool_name:
             return {"success": False, "error": "未指定工具名称"}
+        
+        # 获取工具类
+        try:
+            tool_class = self.registry.get_tool(tool_name)
+            # 创建工具实例并设置为当前工具
+            self.agent.current_tool = tool_class(self.agent)
+            
+            # 检查是否需要启动应用
+            required_app = getattr(tool_class, 'required_app', None)
+            if required_app:
+                # 传入tool_name参数
+                if not self.agent.launch_app(required_app, tool_name=tool_name):
+                    return {
+                        "success": False,
+                        "error": f"无法启动所需应用: {required_app}"
+                    }
+        except Exception as e:
+            return {"success": False, "error": f"工具初始化失败: {str(e)}"}
         
         # 记录当前任务
         self.current_task = {
             "tool": tool_name,
-            "params": params,
+            "params": task_config.get("params", {}),
             "start_time": time.time()
         }
         
         # 运行工具
         try:
-            result = self.agent.run_tool(tool_name, params)
+            result = self.agent.run_tool(tool_name, task_config.get("params", {}))
             
             # 更新任务状态
             self.current_task["end_time"] = time.time()

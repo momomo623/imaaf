@@ -4,6 +4,8 @@ import os
 import sys
 import argparse
 import json
+import logging
+logging.basicConfig(level=logging.DEBUG)
 
 # 确保可以正确导入项目模块
 # current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -38,12 +40,12 @@ def main():
 
     
     # 配置日志
-    import logging
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    # import logging
+    # log_level = logging.DEBUG if args.verbose else logging.INFO
+    # logging.basicConfig(
+    #     level=log_level,
+    #     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    # )
     
     # 打印系统信息
     if args.verbose:

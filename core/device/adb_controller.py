@@ -103,44 +103,32 @@ class ADBController(DeviceController):
         self._adb_command(
             f"shell input swipe {start_x} {start_y} {end_x} {end_y} {duration}"
         )
-    
+
     def adaptive_swipe(self, direction="up", distance_factor=0.5):
-        """自适应滑动（基于屏幕比例）"""
+        """改进后的自适应滑动"""
         width, height = self.get_screen_size()
         mid_x = width // 2
+        mid_y = height // 2
+        
+        # 计算滑动参数
+        base_ratio = 0.5  # 基础滑动比例
+        actual_ratio = base_ratio * distance_factor
         
         if direction == "up":
-            self.swipe(
-                mid_x, 
-                int(height * 0.7), 
-                mid_x, 
-                int(height * (0.7 - distance_factor)),
-                duration=random.randint(200, 500)
-            )
+            start_x, start_y = mid_x, int(height * 0.8)
+            end_x, end_y = mid_x, int(start_y - (height * actual_ratio))
         elif direction == "down":
-            self.swipe(
-                mid_x, 
-                int(height * 0.3), 
-                mid_x, 
-                int(height * (0.3 + distance_factor)),
-                duration=random.randint(200, 500)
-            )
+            start_x, start_y = mid_x, int(height * 0.2)
+            end_x, end_y = mid_x, int(start_y + (height * actual_ratio))
         elif direction == "left":
-            self.swipe(
-                int(width * 0.7), 
-                height // 2, 
-                int(width * (0.7 - distance_factor)), 
-                height // 2,
-                duration=random.randint(200, 500)
-            )
+            start_x, start_y = int(width * 0.8), mid_y
+            end_x, end_y = int(start_x - (width * actual_ratio)), mid_y
         elif direction == "right":
-            self.swipe(
-                int(width * 0.3), 
-                height // 2, 
-                int(width * (0.3 + distance_factor)), 
-                height // 2,
-                duration=random.randint(200, 500)
-            )
+            start_x, start_y = int(width * 0.2), mid_y
+            end_x, end_y = int(start_x + (width * actual_ratio)), mid_y
+        
+        print(f"滑动参数: ({start_x},{start_y}) -> ({end_x},{end_y})")  # 调试输出
+        self.swipe(start_x, start_y, end_x, end_y, duration=300)
     
     def capture_screenshot(self, filename=None):
         """捕获屏幕截图"""
@@ -154,11 +142,14 @@ class ADBController(DeviceController):
     def get_screen_size(self):
         """获取屏幕尺寸"""
         output = self._adb_command("shell wm size").stdout
+        print(f"原始屏幕尺寸输出: {output}")  # 添加调试输出
+        
         if "Physical size" in output:
             size_str = output.split("Physical size:")[1].strip()
             width, height = map(int, size_str.split("x"))
+            print(f"解析后的屏幕尺寸: {width}x{height}")  # 添加调试输出
             return width, height
-        return None, None
+        return (1080, 2340)  # 添加默认值
     
     def press_back(self):
         """按返回键"""

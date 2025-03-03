@@ -6,6 +6,7 @@ from PIL import Image
 import numpy as np
 import cv2
 from sklearn.metrics.pairwise import cosine_similarity
+import logging
 
 class VisualEngine:
     """视觉感知引擎，整合OCR和视觉模型"""
@@ -45,21 +46,46 @@ class VisualEngine:
         text_elements = []
         for line in result:
             for item in line:
-                coordinates = item[0]  # 文字框的四个角坐标
-                text = item[1][0]      # 识别出的文字内容
-                confidence = item[1][1]  # OCR的置信度
-                
-                # 计算文字框的中心点坐标
-                center_x = sum(point[0] for point in coordinates) / 4
-                center_y = sum(point[1] for point in coordinates) / 4
-                
-                # 保存文字块的完整信息
-                text_elements.append({
-                    "text": text,
-                    "confidence": confidence,
-                    "coordinates": coordinates,
-                    "center": (center_x, center_y)
-                })
+                try:
+                    coordinates = item[0]  # 文字框的四个角坐标
+                    text = item[1][0]      # 识别出的文字内容
+                    confidence = item[1][1]  # OCR的置信度
+                    
+                    # 确保coordinates是列表格式的四个点坐标
+                    if not isinstance(coordinates, list):
+                        logging.warning(f"异常的坐标格式: {coordinates}")
+                        continue
+                    
+                    if len(coordinates) != 4:
+                        logging.warning(f"坐标点数量不正确: {len(coordinates)}")
+                        continue
+                    
+                    # 计算文字框的中心点坐标
+                    center_x = sum(point[0] for point in coordinates) / 4
+                    center_y = sum(point[1] for point in coordinates) / 4
+                    
+                    # 计算边界框
+                    x_coords = [p[0] for p in coordinates]
+                    y_coords = [p[1] for p in coordinates]
+                    bbox = [
+                        min(x_coords),  # x1
+                        min(y_coords),  # y1
+                        max(x_coords),  # x2
+                        max(y_coords)   # y2
+                    ]
+                    
+                    # 保存文字块的完整信息
+                    text_elements.append({
+                        "text": text,
+                        "confidence": confidence,
+                        "coordinates": coordinates,
+                        "center": (center_x, center_y),
+                        "bbox": bbox
+                    })
+                except Exception as e:
+                    logging.error(f"处理OCR结果时出错: {str(e)}")
+                    logging.debug(f"问题数据: {item}")
+                    continue
         
         return text_elements
     
@@ -111,64 +137,103 @@ class VisualEngine:
         
         return sorted_elements
     
-    def hybrid_semantic_search(self, query_text, image, text_elements=None, grid_size=(3, 3)):
-        """混合语义搜索：结合文本和图像区域的双路径搜索
+    def hybrid_semantic_search(self, query_text, image, exclude_regions=[]):
+        """改进的混合语义搜索，可排除指定区域"""
+        # 确保图像格式正确
+        if isinstance(image, np.ndarray):
+            # OpenCV格式转PIL格式（如果需要）
+            if len(image.shape) == 3 and image.shape[2] == 3:
+                image_pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            else:
+                image_pil = Image.fromarray(image)
+        else:
+            image_pil = image
         
-        Args:
-            query_text: 查询文本
-            image: 待搜索的图像
-            text_elements: 可选，预先提取好的文字信息
-            grid_size: 图像网格划分尺寸
-            
-        Returns:
-            list: 综合排序后的匹配元素列表
-        """
-        # 获取基于文本的匹配结果
-        text_matches = self.semantic_search(query_text, image, text_elements)
+        # 获取图像尺寸（用于日志）
+        if isinstance(image, np.ndarray):
+            height, width = image.shape[:2]
+        else:
+            width, height = image.size
         
-        # 获取基于图像区域的匹配结果
-        visual_matches = self.visual_semantic_search(query_text, image, grid_size=grid_size)
+        logging.debug(f"处理图像尺寸: {width}x{height}")
         
-        # 文本匹配为空的情况，直接返回视觉匹配结果
-        if not text_matches:
-            return [{"type": "visual", "data": item} for item in visual_matches]
+        # 文本匹配结果
+        text_matches = self.semantic_search(query_text, image)
         
-        # 综合两种结果
-        # 为每种匹配添加类型标识
-        typed_text_matches = [{"type": "text", "data": item} for item in text_matches]
-        typed_visual_matches = [{"type": "visual", "data": item} for item in visual_matches]
+        # 转换文本匹配结果格式
+        formatted_text_matches = []
+        for match in text_matches:
+            try:
+                formatted_text_matches.append({
+                    "type": "text",
+                    "score": match["similarity"],
+                    "data": {
+                        "text": match["text"],
+                        "center": match["center"],
+                        "bbox": match.get("bbox", match["coordinates"])  # 使用bbox或coordinates
+                    }
+                })
+            except Exception as e:
+                logging.error(f"格式化文本匹配结果时出错: {str(e)}")
+                logging.debug(f"问题数据: {match}")
+                continue
         
-        # 对匹配项进行综合评分
-        all_matches = []
+        # 视觉匹配结果
+        visual_matches = self.visual_semantic_search(query_text, image)
         
-        # 处理文本匹配
-        for match in typed_text_matches:
-            # 文本匹配时，保留原始相似度但稍微提高权重
-            match["final_score"] = match["data"]["similarity"] * 1.2
-            all_matches.append(match)
+        # 转换视觉匹配结果格式
+        formatted_visual_matches = []
+        for match in visual_matches:
+            formatted_visual_matches.append({
+                "type": "visual",
+                "score": match["similarity"] * 1.2,  # 提高视觉匹配的权重
+                "data": {
+                    "center": match["center"],
+                    "bbox": match["region"]
+                }
+            })
         
-        # 处理视觉匹配
-        for match in typed_visual_matches:
-            # 检查该视觉区域是否与文本区域重叠，如果重叠则提高分数
-            visual_region = match["data"]["region"]
-            match["final_score"] = match["data"]["similarity"]
-            
-            # 检查与文本区域的重叠
-            for text_match in text_matches:
-                text_center = text_match["center"]
-                if (visual_region[0] <= text_center[0] <= visual_region[2] and 
-                    visual_region[1] <= text_center[1] <= visual_region[3]):
-                    # 如果视觉区域包含文本中心点，则提高分数
-                    match["final_score"] *= 1.5
-                    match["overlapped_text"] = text_match["text"]
+        # 合并结果
+        combined = []
+        seen_positions = set()
+        
+        # 先添加视觉匹配
+        for match in formatted_visual_matches:
+            pos = tuple(match["data"]["center"])  # 转换为元组以便用作集合元素
+            if pos not in seen_positions:
+                combined.append(match)
+                seen_positions.add(pos)
+        
+        # 再添加文本匹配
+        for match in formatted_text_matches:
+            pos = tuple(match["data"]["center"])
+            if pos not in seen_positions:
+                combined.append(match)
+                seen_positions.add(pos)
+        
+        # 过滤排除区域
+        filtered_combined = []
+        for match in combined:
+            # 检查是否在排除区域内
+            in_excluded = False
+            x, y = match["data"]["center"]
+            for (x1, y1, x2, y2) in exclude_regions:
+                if x1 <= x <= x2 and y1 <= y <= y2:
+                    in_excluded = True
                     break
-            
-            all_matches.append(match)
+            if not in_excluded:
+                filtered_combined.append(match)
         
-        # 按最终分数排序
-        sorted_matches = sorted(all_matches, key=lambda x: x["final_score"], reverse=True)
+        # 按置信度排序
+        filtered_combined.sort(key=lambda x: x["score"], reverse=True)
         
-        return sorted_matches
+        # 添加调试信息
+        for match in filtered_combined:
+            logging.debug(f"匹配项: 类型={match['type']} "
+                         f"分数={match['score']:.3f} "
+                         f"位置={match['data']['center']}")
+        
+        return filtered_combined
     
     def visual_semantic_search(self, query_text, image, top_k=5, grid_size=(3, 3)):
         """图像语义搜索：将图像分割成网格，找出与查询文本语义最相关的图像区域
