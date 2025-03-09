@@ -5,6 +5,7 @@ from core.device.adb_controller import ADBController
 from core.perception.visual_engine import VisualEngine
 from core.cognition.ai_brain import AIBrain
 from core.memory.state_tracker import StateTracker
+from engine.tools.app_launcher import AppLauncher
 
 class Agent:
     """代理执行器，集成所有核心功能"""
@@ -20,6 +21,18 @@ class Agent:
         # 导入工具注册中心
         from utools.tool_registry import ToolRegistry
         self.registry = ToolRegistry()  # 添加registry属性
+        
+        # 导入配置管理器
+        from uutils.config_manager import ConfigManager
+        self.config = ConfigManager()
+        
+        # 初始化应用启动器
+        self.app_launcher = AppLauncher(
+            device=self.device,
+            vision=self.vision,
+            brain=self.brain,
+            config=self.config
+        )
         
         # 内部状态
         self.running = False
@@ -223,120 +236,20 @@ class Agent:
         }
     
     def launch_app(self, app_name, tool_name=None):
-        """改进的应用启动流程 - 使用APP抽屉方式
+        """启动应用(委托给应用启动器)
         
         Args:
             app_name: 要启动的应用名称
             tool_name: 可选，工具名称（用于自定义启动检查）
+        
+        Returns:
+            bool: 是否成功启动应用
         """
-        logging.info(f"开始启动应用: {app_name}")
-        
-        # 第一步：返回主屏幕
-        self.device.press_home()
-        time.sleep(1.5)
-        
-        # 第二步：尝试打开应用抽屉(多种方式)
-        app_drawer_found = False
-        
-        # 方式1: 上滑打开
-        for attempt in range(2):
-            self.device.adaptive_swipe("up", distance_factor=0.4+attempt*0.1)
-            time.sleep(1.5)
-            
-            # 检查是否出现应用列表
-            screenshot = self.device.capture_screenshot()
-            text_elements = self.vision.extract_text(screenshot)
-            
-            # 先尝试直接在应用抽屉中查找目标应用
-            app_matches = self.vision.find_text(app_name, text_elements)
-            if app_matches:
-                logging.info(f"在应用抽屉中直接找到应用: {app_name}")
-                app_drawer_found = True
-                break
-            
-            # 检查是否有搜索应用的入口
-            search_matches = self.vision.find_text("搜索", text_elements)
-            if search_matches or any("应用" in elem["text"] for elem in text_elements):
-                app_drawer_found = True
-                break
-        
-        # 方式2: 如果上滑失败，尝试点击应用抽屉图标
-        if not app_drawer_found:
-            logging.info("尝试通过点击应用抽屉图标打开")
-            # 屏幕底部中心区域可能有应用抽屉图标
-            width, height = self.device.get_screen_size()
-            self.device.tap(width//2, height-100)  # 点击底部中心
-            time.sleep(1.5)
-            
-            # 再次检查是否成功打开
-            screenshot = self.device.capture_screenshot()
-            text_elements = self.vision.extract_text(screenshot)
-            app_matches = self.vision.find_text(app_name, text_elements)
-            if app_matches:
-                app_drawer_found = True
-            
-        # 如果无法打开应用抽屉，则尝试在主屏幕上查找
-        if not app_drawer_found:
-            logging.warning("无法打开应用抽屉，尝试在主屏幕上查找应用")
-            screenshot = self.device.capture_screenshot()
-            text_elements = self.vision.extract_text(screenshot)
-            app_matches = self.vision.find_text(app_name, text_elements)
-            
-            if not app_matches:
-                logging.error(f"无法找到应用: {app_name}")
-                return False
-        else:
-            # 应用抽屉已打开，在这里搜索应用
-            logging.info("应用抽屉已打开，搜索应用")
-            screenshot = self.device.capture_screenshot()
-            text_elements = self.vision.extract_text(screenshot)
-            app_matches = self.vision.find_text(app_name, text_elements)
-            
-            # 如果没有立即找到，尝试滑动几次查找
-            page_count = 0
-            while not app_matches and page_count < 3:
-                self.device.adaptive_swipe("up", distance_factor=0.3)
-                time.sleep(1)
-                screenshot = self.device.capture_screenshot()
-                text_elements = self.vision.extract_text(screenshot)
-                app_matches = self.vision.find_text(app_name, text_elements)
-                page_count += 1
-        
-        # 如果找到了应用，点击它
-        if app_matches:
-            best_match = app_matches[0]
-            x, y = best_match["center"]
-            logging.info(f"找到应用图标，位置: ({x}, {y})")
-            self.device.tap(x, y)
-            
-            # 等待应用启动
-            start_time = time.time()
-            while time.time() - start_time < self.app_launch_timeout:
-                try:
-                    if tool_name and hasattr(self.registry.get_tool(tool_name), 'check_app_launched'):
-                        tool_class = self.registry.get_tool(tool_name)
-                        if tool_class.check_app_launched(self):
-                            logging.info(f"应用 {app_name} 启动成功（自定义检查）")
-                            return True
-                    else:
-                        # 默认检查
-                        screenshot = self.device.capture_screenshot()
-                        text_elements = self.vision.extract_text(screenshot)
-                        matches = self.vision.find_text(app_name, text_elements)
-                        if matches:
-                            logging.info(f"应用 {app_name} 启动成功（默认检查）")
-                            return True
-                    
-                    time.sleep(1)
-                    
-                except Exception as e:
-                    logging.error(f"启动检查时出错: {str(e)}")
-            
-            logging.warning(f"应用 {app_name} 启动超时")
-            return False
-        else:
-            logging.error(f"无法找到应用: {app_name}")
-            return False
+        return self.app_launcher.launch_app(
+            app_name=app_name, 
+            tool_name=tool_name,
+            tool_registry=self.registry
+        )
     
     def _detect_search_box(self, screenshot):
         """检测搜索框区域"""

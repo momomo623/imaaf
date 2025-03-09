@@ -20,10 +20,10 @@ from utools.ecommerce.hema_crawler import HemaCrawler
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(description="智能移动应用自动化框架")
-    parser.add_argument('--tool', type=str, help='要运行的工具名称')
+    parser.add_argument('--tool', type=str, help='要运行的工具名称',default='HemaCrawler')
     parser.add_argument('--list-tools', action='store_true', help='列出所有可用工具')
     parser.add_argument('--emulator', type=str, default=None, help='模拟器路径')
-    parser.add_argument('--device-id', type=str, help='设备ID')
+    parser.add_argument('--device-id', type=str, help='设备ID',default='192.168.1.7:5555')
     parser.add_argument('--wifi-device', type=str, help='WiFi设备地址，格式为IP:端口')
     parser.add_argument('--params', type=str, help='工具参数，JSON格式')
     parser.add_argument('--batch', type=str, help='批量任务文件路径')
@@ -32,6 +32,11 @@ def parse_args():
 
 def main():
     """主程序入口"""
+    # 创建必要的目录
+    os.makedirs("config", exist_ok=True)
+    os.makedirs("output", exist_ok=True)
+    os.makedirs("output/debug", exist_ok=True)
+    
     # 解析命令行参数
     print("开始解析命令行参数")
     args = parse_args()

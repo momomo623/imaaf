@@ -1,0 +1,8 @@
+{
+  "apps": {
+    "盒马": {
+      "package": "com.wudaokou.hippo",
+      "component": "com.wudaokou.hippo/com.wudaokou.hippo.launcher.splash.SplashActivity"
+    }
+  }
+}
