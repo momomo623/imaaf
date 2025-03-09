@@ -9,10 +9,10 @@ from core.memory.state_tracker import StateTracker
 class Agent:
     """代理执行器，集成所有核心功能"""
     
-    def __init__(self, device_id=None, emulator_path=None):
+    def __init__(self, device_id=None, emulator_path=None, wifi_device=None):
         """初始化代理"""
         # 初始化核心组件
-        self.device = ADBController(device_id, emulator_path)
+        self.device = ADBController(device_id, emulator_path, wifi_device)
         self.vision = VisualEngine()
         self.brain = AIBrain()
         self.memory = StateTracker()
@@ -28,7 +28,7 @@ class Agent:
         # 添加应用启动相关参数
         self.app_launch_timeout = 10  # 应用启动超时时间（秒）
         
-        print(f"Agent初始化完成，设备ID: {device_id}, 模拟器路径: {emulator_path}")
+        print(f"Agent初始化完成，设备ID: {device_id}, WiFi设备: {wifi_device}, 模拟器路径: {emulator_path}")
     
     def execute_action(self, action):
         """执行单个动作
@@ -56,10 +56,9 @@ class Agent:
                 # 处理文本点击
                 elif isinstance(target, str):
                     current_screen = self.capture_and_analyze()
-                    # 语义搜索匹配文本
-                    matches = self.vision.semantic_search(
+                    # 查找匹配文本
+                    matches = self.vision.find_text(
                         target, 
-                        current_screen["screenshot"],
                         current_screen["text_elements"]
                     )
                     
@@ -103,7 +102,7 @@ class Agent:
         return result
     
     def _execute_visual_search_action(self, action):
-        """执行基于视觉语义搜索的操作"""
+        """执行基于OCR文本匹配的操作"""
         target = action.get("target", "")
         if not target:
             return {"success": False, "message": "未指定搜索目标"}
@@ -111,10 +110,9 @@ class Agent:
         # 获取当前屏幕
         current_screen = self.capture_and_analyze()
         
-        # 使用混合语义搜索
-        matches = self.vision.hybrid_semantic_search(
+        # 使用文本匹配查找目标
+        matches = self.vision.find_text(
             query_text=target,
-            image=current_screen["screenshot"],
             text_elements=current_screen["text_elements"]
         )
         
@@ -123,27 +121,14 @@ class Agent:
         
         best_match = matches[0]
         
-        # 根据匹配类型处理点击操作
-        if best_match["type"] == "text":
-            # 文本匹配结果
-            x, y = best_match["data"]["center"]
-            self.device.tap(x, y)
-            return {
-                "success": True,
-                "message": f"点击文本 '{best_match['data']['text']}' 位置 ({x}, {y})",
-                "match_type": "text",
-                "match": best_match["data"]
-            }
-        else:
-            # 视觉区域匹配结果
-            x, y = best_match["data"]["center"]
-            self.device.tap(x, y)
-            return {
-                "success": True,
-                "message": f"点击视觉区域中心 ({x}, {y})",
-                "match_type": "visual",
-                "match": best_match["data"]
-            }
+        # 执行点击操作
+        x, y = best_match["center"]
+        self.device.tap(x, y)
+        return {
+            "success": True,
+            "message": f"点击文本 '{best_match['text']}' 位置 ({x}, {y})",
+            "match": best_match
+        }
     
     def capture_and_analyze(self):
         """捕获并分析屏幕
@@ -238,7 +223,7 @@ class Agent:
         }
     
     def launch_app(self, app_name, tool_name=None):
-        """通用应用启动流程
+        """改进的应用启动流程 - 使用APP抽屉方式
         
         Args:
             app_name: 要启动的应用名称
@@ -250,116 +235,120 @@ class Agent:
         self.device.press_home()
         time.sleep(1.5)
         
-        # 第二步：多次尝试上滑调出搜索框
-        for attempt in range(3):
+        # 第二步：尝试打开应用抽屉(多种方式)
+        app_drawer_found = False
+        
+        # 方式1: 上滑打开
+        for attempt in range(2):
             self.device.adaptive_swipe("up", distance_factor=0.4+attempt*0.1)
             time.sleep(1.5)
             
-            # 检查是否出现搜索框
+            # 检查是否出现应用列表
             screenshot = self.device.capture_screenshot()
-            matches = self.vision.hybrid_semantic_search("搜索", screenshot)
-            if matches:
-                print(f"第{attempt+1}次滑动成功调出搜索框")
-                
-                # 点击搜索框
-                best_match = matches[0]
-                x, y = best_match["data"]["center"]
-                print(f"点击搜索框位置: ({x}, {y})")
-                self.device.tap(x, y)
-                time.sleep(1)
+            text_elements = self.vision.extract_text(screenshot)
+            
+            # 先尝试直接在应用抽屉中查找目标应用
+            app_matches = self.vision.find_text(app_name, text_elements)
+            if app_matches:
+                logging.info(f"在应用抽屉中直接找到应用: {app_name}")
+                app_drawer_found = True
                 break
+            
+            # 检查是否有搜索应用的入口
+            search_matches = self.vision.find_text("搜索", text_elements)
+            if search_matches or any("应用" in elem["text"] for elem in text_elements):
+                app_drawer_found = True
+                break
+        
+        # 方式2: 如果上滑失败，尝试点击应用抽屉图标
+        if not app_drawer_found:
+            logging.info("尝试通过点击应用抽屉图标打开")
+            # 屏幕底部中心区域可能有应用抽屉图标
+            width, height = self.device.get_screen_size()
+            self.device.tap(width//2, height-100)  # 点击底部中心
+            time.sleep(1.5)
+            
+            # 再次检查是否成功打开
+            screenshot = self.device.capture_screenshot()
+            text_elements = self.vision.extract_text(screenshot)
+            app_matches = self.vision.find_text(app_name, text_elements)
+            if app_matches:
+                app_drawer_found = True
+            
+        # 如果无法打开应用抽屉，则尝试在主屏幕上查找
+        if not app_drawer_found:
+            logging.warning("无法打开应用抽屉，尝试在主屏幕上查找应用")
+            screenshot = self.device.capture_screenshot()
+            text_elements = self.vision.extract_text(screenshot)
+            app_matches = self.vision.find_text(app_name, text_elements)
+            
+            if not app_matches:
+                logging.error(f"无法找到应用: {app_name}")
+                return False
         else:
-            print("三次滑动尝试均未调出搜索框")
-            return False
-        
-        # 第三步：输入应用名称
-        self.device.input_text(app_name)
-        
-        # 第四步：视觉识别应用图标
-        screenshot = self.device.capture_screenshot()
-        height, width = screenshot.shape[:2]
-        logging.info(f"屏幕尺寸: {width}x{height}")
-        # 获取并记录搜索框区域
-        search_box_region = self._detect_search_box(screenshot)
-        logging.info(f"搜索框区域: {search_box_region}")
-        # 在搜索框下方搜索应用图标
-        matches = self.vision.hybrid_semantic_search(
-            query_text=app_name,
-            image=screenshot,
-            exclude_regions=[search_box_region]
-        )
-        
-        logging.info(f"找到 {len(matches)} 个匹配项")
-        for i, match in enumerate(matches[:3]):
-            logging.info(f"匹配项 {i+1}: 类型={match['type']} "
-                        f"分数={match['score']:.3f} "
-                        f"位置={match['data']['center']}")
-        
-        if not matches:
-            print(f"未找到应用: {app_name}")
-            return False
-        
-        # 选择最佳匹配项
-        best_match = matches[0]
-        x, y = best_match["data"]["center"]
-        
-        # 第五步：点击应用图标
-        logging.info(f"点击应用图标位置: ({x}, {y})")
-        self.device.tap(x, y)
-        
-        # 第六步：等待应用启动
-        start_time = time.time()
-        while time.time() - start_time < self.app_launch_timeout:
-            try:
-                if tool_name:
-                    # 使用传入的工具名称获取工具类
-                    tool_class = self.registry.get_tool(tool_name)
-                elif self.current_tool:
-                    # 使用当前工具
-                    tool_class = self.registry.get_tool(self.current_tool.name)
-                else:
-                    # 没有工具信息时使用默认检查
-                    tool_class = None
-                
-                # 如果有工具类且定义了启动检查方法，使用它
-                if tool_class and hasattr(tool_class, 'check_app_launched'):
-                    if tool_class.check_app_launched(self):
-                        logging.info(f"应用 {app_name} 启动成功（自定义检查）")
-                        return True
-                else:
-                    # 使用默认的视觉检查
-                    screenshot = self.device.capture_screenshot()
-                    matches = self.vision.hybrid_semantic_search(
-                        query_text=app_name,
-                        image=screenshot
-                    )
-                    if matches and matches[0]["score"] > 0.7:
-                        logging.info(f"应用 {app_name} 启动成功（默认检查）")
-                        return True
-                
+            # 应用抽屉已打开，在这里搜索应用
+            logging.info("应用抽屉已打开，搜索应用")
+            screenshot = self.device.capture_screenshot()
+            text_elements = self.vision.extract_text(screenshot)
+            app_matches = self.vision.find_text(app_name, text_elements)
+            
+            # 如果没有立即找到，尝试滑动几次查找
+            page_count = 0
+            while not app_matches and page_count < 3:
+                self.device.adaptive_swipe("up", distance_factor=0.3)
                 time.sleep(1)
-                
-            except Exception as e:
-                logging.error(f"启动检查时出错: {str(e)}")
-                # 继续尝试检查，而不是直接失败
-                
-        logging.warning(f"应用 {app_name} 启动超时")
-        return False
+                screenshot = self.device.capture_screenshot()
+                text_elements = self.vision.extract_text(screenshot)
+                app_matches = self.vision.find_text(app_name, text_elements)
+                page_count += 1
+        
+        # 如果找到了应用，点击它
+        if app_matches:
+            best_match = app_matches[0]
+            x, y = best_match["center"]
+            logging.info(f"找到应用图标，位置: ({x}, {y})")
+            self.device.tap(x, y)
+            
+            # 等待应用启动
+            start_time = time.time()
+            while time.time() - start_time < self.app_launch_timeout:
+                try:
+                    if tool_name and hasattr(self.registry.get_tool(tool_name), 'check_app_launched'):
+                        tool_class = self.registry.get_tool(tool_name)
+                        if tool_class.check_app_launched(self):
+                            logging.info(f"应用 {app_name} 启动成功（自定义检查）")
+                            return True
+                    else:
+                        # 默认检查
+                        screenshot = self.device.capture_screenshot()
+                        text_elements = self.vision.extract_text(screenshot)
+                        matches = self.vision.find_text(app_name, text_elements)
+                        if matches:
+                            logging.info(f"应用 {app_name} 启动成功（默认检查）")
+                            return True
+                    
+                    time.sleep(1)
+                    
+                except Exception as e:
+                    logging.error(f"启动检查时出错: {str(e)}")
+            
+            logging.warning(f"应用 {app_name} 启动超时")
+            return False
+        else:
+            logging.error(f"无法找到应用: {app_name}")
+            return False
     
     def _detect_search_box(self, screenshot):
         """检测搜索框区域"""
         height, width = screenshot.shape[:2]
         
-        # 使用视觉搜索定位搜索框
-        search_box_matches = self.vision.hybrid_semantic_search(
-            "搜索", 
-            screenshot,
-            exclude_regions=[]
-        )
+        # 使用OCR定位搜索框
+        text_elements = self.vision.extract_text(screenshot)
+        search_matches = self.vision.find_text("搜索", text_elements)
         
-        if search_box_matches:
-            best_match = search_box_matches[0]
-            x1, y1, x2, y2 = best_match["data"]["bbox"]
+        if search_matches:
+            best_match = search_matches[0]
+            x1, y1, x2, y2 = best_match["bbox"]
             # 扩大搜索框区域，确保完全覆盖
             y2 = min(y2 + 50, height)  # 向下扩展50像素，但不超过屏幕高度
             return (x1, y1, x2, y2)

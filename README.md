@@ -205,22 +205,54 @@ paddlepaddle==3.0.0b1
 paddleocr==2.7.0.3
 ```
 
+## 设备连接指南
+
+### 有线连接（推荐）
+```bash
+# 1. 通过USB连接设备
+# 2. 启用USB调试（设置 → 开发者选项）
+# 3. 直接运行工具（自动检测设备）
+python main.py --tool HemaCrawler
+```
+
+### 无线连接
+```bash
+# 1. 确保设备和电脑在同一WiFi网络
+# 2. 在设备上启用无线调试
+# 3. 连接设备
+python main.py --wifi-device 192.168.1.7:5555 --tool HemaCrawler
+```
+
+### 连接状态检查
+```bash
+# 检查当前连接状态
+python main.py --device-id [DEVICE_ID] --check-connection
+
+# 输出示例
+# 设备连接正常 (USB连接): emulator-5554
+```
+
 ## 常见问题解答
 
-1. **Q: 如何在不同操作系统上使用？**
-   A: 框架主要依赖ADB进行设备控制，支持Windows、macOS和Linux。在Windows上，需要确保ADB已添加到系统PATH中。
+### 连接问题排查
+1. **Q: 无线连接提示"Connection refused"怎么办？**
+   A: 请按顺序执行：
+   - 通过USB执行 `adb tcpip 5555`
+   - 断开USB线后重试连接
+   - 检查防火墙设置
 
-2. **Q: 支持哪些模拟器？**
-   A: 框架支持所有基于Android的模拟器，包括MuMu模拟器、夜神模拟器、BlueStacks等。
+2. **Q: 如何保持无线连接稳定？**
+   A: 
+   - 在开发者选项中开启"始终保持WiFi连接"
+   - 为设备分配静态IP
+   - 避免设备进入深度睡眠模式
 
-3. **Q: 如何处理需要登录的应用？**
-   A: 可以在工具的`setup`方法中实现登录逻辑，或者使用已登录的模拟器实例。
-
-4. **Q: 如何提高OCR识别准确率？**
-   A: 可以通过调整图像预处理参数、使用特定领域的OCR模型或结合CLIP进行多模态识别来提高准确率。
-
-5. **Q: 如何创建批量任务文件？**
-   A: 批量任务文件是一个JSON数组，每个元素代表一个任务。您可以使用任何文本编辑器创建，确保遵循正确的JSON格式。
+3. **Q: 同时连接多个设备如何操作？**
+   A: 使用`--device-id`参数指定设备：
+   ```bash
+   python main.py --device-id 192.168.1.100:5555 --tool HemaCrawler
+   python main.py --device-id emulator-5554 --tool HemaCrawler
+   ```
 
 ## 贡献指南
 

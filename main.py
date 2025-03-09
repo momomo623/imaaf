@@ -5,8 +5,7 @@ import sys
 import argparse
 import json
 import logging
-logging.basicConfig(level=logging.DEBUG)
-
+# logging.basicConfig(level=logging.DEBUG)
 # 确保可以正确导入项目模块
 # current_dir = os.path.dirname(os.path.abspath(__file__))
 # if current_dir not in sys.path:
@@ -23,8 +22,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="智能移动应用自动化框架")
     parser.add_argument('--tool', type=str, help='要运行的工具名称')
     parser.add_argument('--list-tools', action='store_true', help='列出所有可用工具')
-    parser.add_argument('--emulator', type=str, default="/Applications/MuMuPlayer.app", help='模拟器路径')
+    parser.add_argument('--emulator', type=str, default=None, help='模拟器路径')
     parser.add_argument('--device-id', type=str, help='设备ID')
+    parser.add_argument('--wifi-device', type=str, help='WiFi设备地址，格式为IP:端口')
     parser.add_argument('--params', type=str, help='工具参数，JSON格式')
     parser.add_argument('--batch', type=str, help='批量任务文件路径')
     parser.add_argument('-v', '--verbose', action='store_true', help='显示详细日志')
@@ -69,8 +69,14 @@ def main():
         return 0
     
     # 初始化代理和任务管理器
-    agent = Agent(device_id=args.device_id, emulator_path=args.emulator)
+    agent = Agent(device_id=args.device_id, emulator_path=args.emulator, wifi_device=args.wifi_device)
     task_manager = TaskManager(agent)
+    
+    # 添加在执行任务前检查设备连接状态
+    if not agent.device.check_connection():
+        print("错误: 未检测到有效的设备连接！")
+        print("请确保已通过USB连接设备，或使用--wifi-device参数指定无线设备")
+        return 1
     
     # 批量执行任务
     if args.batch:
